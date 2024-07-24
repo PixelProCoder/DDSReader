@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <dxgiformat.h>
+#include <fstream>
 
 struct SubResourceData
 {
@@ -108,6 +109,30 @@ struct DDSHeaderDXT10
 	unsigned int arraySize;
 	unsigned int miscFlags2;
 };
+
+inline void LoadDDSTextureFromFile(const char* fileName)
+{
+	std::ifstream file(fileName, std::ifstream::in);
+
+	DDSHeader* header = nullptr;
+	DDSHeaderDXT10* dx10Header = nullptr;
+	uint8_t* surfaceData = nullptr;
+
+	if (DecodeHeader(nullptr, 0, &header, &dx10Header, &surfaceData))
+	{
+		unsigned int numTextures = 1;
+		if (dx10Header != nullptr)
+		{
+			numTextures = dx10Header->arraySize;
+		}
+
+		// Total array size: numTextures * numMipMaps per each texture
+		SubResourceData* subresources = new SubResourceData[numTextures * header->mipMapCount];
+
+		GetInitData(*header, numTextures, subresources, surfaceData, GetDXGIFormat(header->ddspf));
+	};
+
+}
 
 inline bool DecodeHeader(uint8_t* fileData, size_t file_size, DDSHeader** ddsHeader, DDSHeaderDXT10** dxt10Header, uint8_t** ddsData)
 {
@@ -337,7 +362,7 @@ inline DXGI_FORMAT GetDXGIFormat(DDSPixelFormat& ddspf)
 	return DXGI_FORMAT_UNKNOWN;
 }
 
-inline void GetInitData(DDSHeader& header, uint32_t arraySize, SubResourceData* initData, uint8_t* ddsData, DXGI_FORMAT format)
+inline void GetInitData(DDSHeader& header, uint32_t numTextures, SubResourceData* initData, uint8_t* ddsData, DXGI_FORMAT format)
 {
 	unsigned int scanLineSize = 0;
 	unsigned int slicePitch = 0;
@@ -346,16 +371,18 @@ inline void GetInitData(DDSHeader& header, uint32_t arraySize, SubResourceData* 
 
 	switch (format)
 	{
-	case DXGI_FORMAT_BC1_UNORM:
+	case DXGI_FORMAT_BC1_UNORM:		 // DXT1 / BC1
 	case DXGI_FORMAT_BC1_UNORM_SRGB:
-	case DXGI_FORMAT_BC4_UNORM:
+	case DXGI_FORMAT_BC4_UNORM:		 // BC4U
+	case DXGI_FORMAT_BC4_SNORM:		 // BC4S
 		blockSize = 8;
 		break;
-	case DXGI_FORMAT_BC2_UNORM:
-	case DXGI_FORMAT_BC2_UNORM_SRGB:
-	case DXGI_FORMAT_BC3_UNORM:
-	case DXGI_FORMAT_BC3_UNORM_SRGB:
-	case DXGI_FORMAT_BC5_UNORM:
+	case DXGI_FORMAT_BC2_UNORM:		 // DXT2 / DXT3
+	case DXGI_FORMAT_BC2_UNORM_SRGB: // 
+	case DXGI_FORMAT_BC3_UNORM:		 // DXT4 / DXT5
+	case DXGI_FORMAT_BC3_UNORM_SRGB: // 
+	case DXGI_FORMAT_BC5_UNORM:		 // ATI2
+	case DXGI_FORMAT_BC5_SNORM:		 // BC5S
 		blockSize = 16;
 		break;
 	default:
@@ -368,7 +395,7 @@ inline void GetInitData(DDSHeader& header, uint32_t arraySize, SubResourceData* 
 
 	unsigned int index = 0;
 
-	for (unsigned int i = 0; i < arraySize; ++i)
+	for (unsigned int i = 0; i < numTextures; ++i)
 	{
 		width = header.width;
 		height = header.height;
@@ -376,7 +403,7 @@ inline void GetInitData(DDSHeader& header, uint32_t arraySize, SubResourceData* 
 
 		for (unsigned int j = 0; j < header.mipMapCount; ++j)
 		{
-			// This will recalculate te pitch of the main image as well.
+			// This will recalculate the pitch of the highest mip-map level as well.
 			if (header.flags & DDS_HEADER_FLAGS_LINEARSIZE)
 			{
 				// compressed textures
@@ -397,6 +424,7 @@ inline void GetInitData(DDSHeader& header, uint32_t arraySize, SubResourceData* 
 
 			++index;
 
+			// Calculate the width and height of each subsequent mip-map level.
 			width >>= 1;
 			height >>= 1;
 			depth >>= 1;
